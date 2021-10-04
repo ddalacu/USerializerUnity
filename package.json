@@ -1,0 +1,10 @@
+{
+  "name": "com.serializer",
+  "displayName": "USerializer",
+  "description": "Binary serializer.",
+  "version": "1.4.0",
+  "unity": "2018.4",
+  "author": {
+    "name": "Diac Paul Alexandru"
+  }
+}
