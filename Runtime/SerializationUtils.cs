@@ -52,22 +52,30 @@ namespace USerialization.Unity
         }
         
         public static readonly ObjectPool<SerializerOutput> OutputPool =
-            new ObjectPool<SerializerOutput>(() => new SerializerOutput(2048 * 4));
+            new ObjectPool<SerializerOutput>(() => new SerializerOutput(2048 * 4), (output) =>
+            {
+                if (output.Stream == null) 
+                    return;
+                output.Flush();
+                output.SetStream(null);
+            });
 
         public static readonly ObjectPool<SerializerInput> InputPool =
-            new ObjectPool<SerializerInput>(() => new SerializerInput(2048 * 4));
+            new ObjectPool<SerializerInput>(() => new SerializerInput(2048 * 4), (input) =>
+            {
+                input.FinishRead();
+                input.SetStream(null);
+            });
 
         public static void Serialize(this USerializer serializer, Stream stream, object obj)
         {
             using (OutputPool.Get(out var output))
             {
                 output.SetStream(stream);
+                
                 var success = serializer.Serialize(output, obj);
                 if (success == false)
                     throw new Exception($"Failed to serialize {obj}, returning default!");
-                
-                output.Flush();
-                output.SetStream(null);
             }
         }
 
@@ -76,13 +84,10 @@ namespace USerialization.Unity
             using (InputPool.Get(out var input))
             {
                 input.SetStream(stream);
+                
                 var success = serializer.TryDeserialize(input, ref data);
-
                 if (success == false)
                     throw new Exception($"Failed to serialize {typeof(T)}, returning default!");
-
-                input.FinishRead();
-                input.SetStream(null);
             }
         }
 
@@ -94,13 +99,11 @@ namespace USerialization.Unity
             using (InputPool.Get(out var input))
             {
                 input.SetStream(stream);
+                
                 var success = serializer.TryDeserialize(input, ref data);
 
                 if (success == false)
                     throw new Exception($"Failed to serialize {typeof(T)}, returning default!");
-
-                input.FinishRead();
-                input.SetStream(null);
             }
         }
 
@@ -114,9 +117,6 @@ namespace USerialization.Unity
 
                 if (success == false)
                     throw new Exception($"Failed to serialize {typeof(T)}, returning default!");
-
-                input.FinishRead();
-                input.SetStream(null);
                 return data;
             }
         }

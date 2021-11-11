@@ -1,32 +1,43 @@
-﻿using System;
-using System.Collections.Concurrent;
-
-namespace USerialization.Unity
+﻿namespace USerialization.Unity
 {
+    using System;
+    using System.Collections.Generic;
+
     public class ObjectPool<T>
     {
-        private ConcurrentBag<T> _objects;
-        private Func<T> _objectGenerator;
+        private readonly Stack<T> _objects;
+        private readonly Func<T> _objectGenerator;
+        private readonly Action<T> _cleanObject;
 
-        public ObjectPool(Func<T> objectGenerator)
+        public ObjectPool(Func<T> objectGenerator, Action<T> cleanObject = null)
         {
             if (objectGenerator == null)
-                throw new ArgumentNullException("objectGenerator");
-            _objects = new ConcurrentBag<T>();
+                throw new ArgumentNullException(nameof(objectGenerator));
+
+            _objects = new Stack<T>(32);
             _objectGenerator = objectGenerator;
+            _cleanObject = cleanObject;
         }
 
         public T GetObject()
         {
-            T item;
-            if (_objects.TryTake(out item))
-                return item;
+            lock (_objects)
+            {
+                if (_objects.Count > 0)
+                    return _objects.Pop();
+            }
+
             return _objectGenerator();
         }
 
         public void PutObject(T item)
         {
-            _objects.Add(item);
+            _cleanObject?.Invoke(item);
+
+            lock (_objects)
+            {
+                _objects.Push(item);
+            }
         }
 
         public PooledObjectHandle<T> Get(out T item)
