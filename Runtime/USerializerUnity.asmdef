@@ -1,7 +1,9 @@
 {
     "name": "USerializerUnity",
     "rootNamespace": "",
-    "references": [],
+    "references": [
+        "GUID:c9767f47fa16b434080b3151252cb730"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,

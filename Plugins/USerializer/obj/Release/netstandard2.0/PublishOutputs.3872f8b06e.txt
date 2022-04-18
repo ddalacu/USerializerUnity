@@ -1,7 +1,0 @@
-/home/runner/work/USerializer/USerializer/PublishDirectory/USerializer.dll
-/home/runner/work/USerializer/USerializer/PublishDirectory/USerializer.pdb
-/home/runner/work/USerializer/USerializer/PublishDirectory/System.Buffers.dll
-/home/runner/work/USerializer/USerializer/PublishDirectory/System.Memory.dll
-/home/runner/work/USerializer/USerializer/PublishDirectory/System.Numerics.Vectors.dll
-/home/runner/work/USerializer/USerializer/PublishDirectory/System.Runtime.CompilerServices.Unsafe.dll
-/home/runner/work/USerializer/USerializer/PublishDirectory/USerializer.deps.json
