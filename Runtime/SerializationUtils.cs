@@ -8,19 +8,7 @@ namespace USerialization.Unity
     public static class SerializationUtils
     {
         private static USerializer _serializer;
-
-        public static IntPtr GetMethodPointer(MethodInfo info)
-        {
-            if (Application.isEditor)
-                return info.MethodHandle.GetFunctionPointer();
-
-#if ENABLE_IL2CPP
-            return info.MethodHandle.Value;
-#else
-            return info.MethodHandle.GetFunctionPointer();
-#endif
-        }
-
+        
         public static USerializer Instance
         {
             get
@@ -40,11 +28,7 @@ namespace USerialization.Unity
                         new ListSerializer()
                     };
 
-                    _serializer = new USerializer(new UnitySerializationPolicy(), providers, new DataTypesDatabase(),
-                        logger)
-                    {
-                        GetFunctionPointer = GetMethodPointer
-                    };
+                    _serializer = new USerializer(new UnitySerializationPolicy(), providers, new DataTypesDatabase(), logger);
                 }
 
                 return _serializer;
