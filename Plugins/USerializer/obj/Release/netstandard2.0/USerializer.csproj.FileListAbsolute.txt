@@ -1,0 +1,11 @@
+/home/runner/work/USerializer/USerializer/USerializer/bin/Release/netstandard2.0/USerializer.deps.json
+/home/runner/work/USerializer/USerializer/USerializer/bin/Release/netstandard2.0/USerializer.dll
+/home/runner/work/USerializer/USerializer/USerializer/bin/Release/netstandard2.0/USerializer.pdb
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.csproj.AssemblyReference.cache
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.GeneratedMSBuildEditorConfig.editorconfig
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.AssemblyInfoInputs.cache
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.AssemblyInfo.cs
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.csproj.CoreCompileInputs.cache
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.csproj.Fody.CopyLocal.cache
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.dll
+/home/runner/work/USerializer/USerializer/USerializer/obj/Release/netstandard2.0/USerializer.pdb

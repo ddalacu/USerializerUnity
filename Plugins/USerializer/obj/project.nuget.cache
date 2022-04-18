@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "dgSpecHash": "DbtJbjEA7znNSZAiWKXmMRpQ8ONEuXeWhHee1e29QOe8GsxN47OesNN6t3OyxrNopQCw90FJHfxlI+8IA4tdtQ==",
+  "success": true,
+  "projectFilePath": "/home/runner/work/USerializer/USerializer/USerializer/USerializer.csproj",
+  "expectedPackageFiles": [
+    "/home/runner/.nuget/packages/fody/6.5.1/fody.6.5.1.nupkg.sha512",
+    "/home/runner/.nuget/packages/microsoft.netcore.platforms/1.1.0/microsoft.netcore.platforms.1.1.0.nupkg.sha512",
+    "/home/runner/.nuget/packages/moduleinit.fody/2.1.1/moduleinit.fody.2.1.1.nupkg.sha512",
+    "/home/runner/.nuget/packages/netstandard.library/2.0.3/netstandard.library.2.0.3.nupkg.sha512",
+    "/home/runner/.nuget/packages/system.buffers/4.5.1/system.buffers.4.5.1.nupkg.sha512",
+    "/home/runner/.nuget/packages/system.memory/4.5.4/system.memory.4.5.4.nupkg.sha512",
+    "/home/runner/.nuget/packages/system.numerics.vectors/4.4.0/system.numerics.vectors.4.4.0.nupkg.sha512",
+    "/home/runner/.nuget/packages/system.runtime.compilerservices.unsafe/5.0.0/system.runtime.compilerservices.unsafe.5.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}
