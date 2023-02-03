@@ -9,7 +9,7 @@ namespace USerialization.Unity
 {
     public class UnitySerializationPolicy : ISerializationPolicy
     {
-        private readonly Type _serializeFieldAttributeType = typeof(SerializeFieldAttribute);
+        private readonly Type _serializeFieldAttributeType = typeof(SerializeField);
 
         private readonly Type _nonSerializedAttributeType = typeof(NonSerializedAttribute);
 
