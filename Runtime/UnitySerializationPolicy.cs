@@ -9,7 +9,7 @@ namespace USerialization.Unity
 {
     public class UnitySerializationPolicy : ISerializationPolicy
     {
-        private readonly Type _serializeFieldAttributeType = typeof(SerializeField);
+        private readonly Type _serializeFieldAttributeType = typeof(SerializeFieldAttribute);
 
         private readonly Type _nonSerializedAttributeType = typeof(NonSerializedAttribute);
 
@@ -22,7 +22,7 @@ namespace USerialization.Unity
             if (type.IsAbstract)
                 return false;
 
-            if (type.IsGenericTypeDefinition) // Type<>
+            if (type.IsGenericTypeDefinition)// Type<>
                 return false;
 
             if (type.IsValueType)
@@ -30,11 +30,11 @@ namespace USerialization.Unity
 
             if (type.IsClass)
             {
-                if (type.GetCustomAttribute(_serializableAttributeType) != null)
+                if (Attribute.IsDefined(type, _serializableAttributeType))
                 {
                     if (type.IsGenericType)
                     {
-                        if (ShouldTryToSerialize(type) == false)
+                        if (ShouldTryToSerializeGeneric(type) == false)
                             return false;
                     }
 
@@ -45,14 +45,8 @@ namespace USerialization.Unity
             return false;
         }
 
-        private bool ShouldTryToSerialize(Type type)
+        private bool ShouldTryToSerializeGeneric(Type type)
         {
-            foreach (var genericArgument in type.GetGenericArguments())
-            {
-                if (ShouldSerialize(genericArgument) == false)
-                    return false;
-            }
-
             var genericTypeDefinition = type.GetGenericTypeDefinition();
 
             if (genericTypeDefinition == typeof(Dictionary<,>))
@@ -91,9 +85,7 @@ namespace USerialization.Unity
 
         public string[] GetAlternateNames(FieldInfo fieldInfo)
         {
-            var formerly =
-                (FormerlySerializedAsAttribute[]) Attribute.GetCustomAttributes(fieldInfo,
-                    typeof(FormerlySerializedAsAttribute));
+            var formerly = (FormerlySerializedAsAttribute[])Attribute.GetCustomAttributes(fieldInfo, typeof(FormerlySerializedAsAttribute));
 
             var length = formerly.Length;
 
