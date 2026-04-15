@@ -1,7 +1,7 @@
 using System;
+using System.Buffers;
 using System.IO;
-using System.Reflection;
-using JetBrains.Annotations;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace USerialization.Unity
@@ -20,83 +20,62 @@ namespace USerialization.Unity
 
                     ISerializationProvider[] providers =
                     {
-                        new CustomSerializerProvider(logger),
+                        new PrimitivesSerializerProvider(),
                         new EnumSerializer(),
+                        new ArraySerializer(),
+                        new ListSerializer(),
+                        new TupleSerializationProvider(),
                         new CallbackClassSerializationProvider(),
                         new ClassSerializationProvider(),
                         new StructSerializationProvider(),
-                        new ArraySerializer(),
-                        new ListSerializer()
+                        new KeyValuePairSerializationProvider(),
+                        new DictionarySerializerProvider(),
                     };
 
-                    _serializer = new USerializer(new UnitySerializationPolicy(), providers, new DataTypesDatabase(),
-                        logger);
+                    _serializer = new USerializer(new UnitySerializationPolicy(), providers,
+                        new DataTypesDatabase(),
+                        logger, new UnityRuntimeUtils());
                 }
 
                 return _serializer;
             }
         }
 
-
-        public static void Serialize(this USerializer serializer, Stream stream, object obj)
+        public static void Serialize<T>(this USerializer serializer, Stream stream, ref T obj, object context = null)
         {
-            using (SerializationPools.GetOutput(stream, out var output))
-            {
-                Serialize(serializer, obj, output);
-            }
+            var output = new SerializerOutput(2048, ArrayPool<byte>.Shared);
+            Serialize(serializer, ref obj, ref output, context);
+            output.Flush(stream);
+            output.Dispose();
         }
 
-        public static void Serialize(this USerializer serializer, [NotNull] object obj, SerializerOutput output)
+        public static void Serialize<T>(this USerializer serializer, ref T obj, ref SerializerOutput output,
+            object context = null)
         {
-            if (serializer.TryGetClassHelper(out var helper, obj.GetType()) == false)
-                throw new Exception($"Failed to get serializer for {obj}, returning default!");
-
-            helper.SerializeObject(obj, output, null);
-        }
-
-        public static void Populate<T>(this USerializer serializer, Stream stream, ref T data) where T : class
-        {
-            using (SerializationPools.GetInput(stream, out var input))
-            {
-                Populate(serializer, ref data, input);
-            }
-        }
-
-        public static void Populate<T>(this USerializer serializer, ref T data, SerializerInput input)
-            where T : class
-        {
-            ClassSerializationHelper helper;
-
-            if (data != null)
-            {
-                if (serializer.TryGetClassHelper(out helper, data.GetType()) == false)
-                    throw new Exception($"Failed to get serializer for {data}, returning default!");
-
-                helper.PopulateObject(data, input, null);
-            }
-            else
-            {
-                if (serializer.TryGetClassHelper(out helper, typeof(T)) == false)
-                    throw new Exception($"Failed to get serializer for {data}, returning default!");
-
-                data = (T) helper.DeserializeObject(input, null);
-            }
-        }
-
-        public static T Deserialize<T>(this USerializer serializer, Stream stream) where T : class
-        {
-            using (SerializationPools.GetInput(stream, out var input))
-            {
-                return Deserialize<T>(serializer, input);
-            }
-        }
-
-        public static T Deserialize<T>(this USerializer serializer, SerializerInput input) where T : class
-        {
-            if (serializer.TryGetClassHelper(out var helper, typeof(T)) == false)
+            if (serializer.TryGetDataSerializer(typeof(T), out var dataSerializer) == false)
                 throw new Exception($"Failed to get serializer for {typeof(T)}, returning default!");
 
-            return (T) helper.DeserializeObject(input, null);
+            dataSerializer.Serialize(ref obj, ref output, context);
+        }
+
+        public static void Deserialize<T>(this USerializer serializer, Stream stream, ref T output,
+            object context = null)
+            where T : class
+        {
+            var input = new SerializerInput(2048, stream, ArrayPool<byte>.Shared);
+            Deserialize(serializer, input, ref output, context);
+            input.FinishRead();
+            input.Dispose();
+        }
+
+        public static void Deserialize<T>(this USerializer serializer, SerializerInput input, ref T output,
+            object context = null)
+            where T : class
+        {
+            if (serializer.TryGetDataSerializer(typeof(T), out var dataSerializer) == false)
+                throw new Exception($"Failed to get serializer for {typeof(T)}, returning default!");
+
+            dataSerializer.Deserialize(ref output, ref input, context);
         }
     }
 }
