@@ -46,21 +46,21 @@ namespace USerialization.Unity
             {
             }
 
-            public override void Read(Span<byte> span, ref SerializerInput input, object context)
+            public override void Read(Span<byte> span, ref SerializerInput input)
             {
-                base.Read(span, ref input, context);
+                base.Read(span, ref input);
                 ref var instance =
                     ref Unsafe.As<byte, ISerializationCallbackReceiver>(ref MemoryMarshal.GetReference(span));
                 instance?.OnAfterDeserialize();
             }
 
-            public override void Write(ReadOnlySpan<byte> span, ref SerializerOutput output, object context)
+            public override void Write(ReadOnlySpan<byte> span, ref SerializerOutput output)
             {
                 ref var instance =
                     ref Unsafe.As<byte, ISerializationCallbackReceiver>(ref MemoryMarshal.GetReference(span));
                 instance?.OnBeforeSerialize();
 
-                base.Write(span, ref output, context);
+                base.Write(span, ref output);
             }
         }
     }

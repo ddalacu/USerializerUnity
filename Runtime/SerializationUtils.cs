@@ -44,18 +44,18 @@ namespace USerialization.Unity
         public static void Serialize<T>(this USerializer serializer, Stream stream, ref T obj, object context = null)
         {
             var output = new SerializerOutput(2048, ArrayPool<byte>.Shared);
-            Serialize(serializer, ref obj, ref output, context);
+            output.Context = context;
+            Serialize(serializer, ref obj, ref output);
             output.Flush(stream);
             output.Dispose();
         }
 
-        public static void Serialize<T>(this USerializer serializer, ref T obj, ref SerializerOutput output,
-            object context = null)
+        public static void Serialize<T>(this USerializer serializer, ref T obj, ref SerializerOutput output)
         {
             if (serializer.TryGetDataSerializer(typeof(T), out var dataSerializer) == false)
                 throw new Exception($"Failed to get serializer for {typeof(T)}, returning default!");
 
-            dataSerializer.Serialize(ref obj, ref output, context);
+            dataSerializer.Serialize(ref obj, ref output);
         }
 
         public static void Deserialize<T>(this USerializer serializer, Stream stream, ref T output,
@@ -63,19 +63,19 @@ namespace USerialization.Unity
             where T : class
         {
             var input = new SerializerInput(2048, stream, ArrayPool<byte>.Shared);
-            Deserialize(serializer, input, ref output, context);
+            input.Context = context;
+            Deserialize(serializer, input, ref output);
             input.FinishRead();
             input.Dispose();
         }
 
-        public static void Deserialize<T>(this USerializer serializer, SerializerInput input, ref T output,
-            object context = null)
+        public static void Deserialize<T>(this USerializer serializer, SerializerInput input, ref T output)
             where T : class
         {
             if (serializer.TryGetDataSerializer(typeof(T), out var dataSerializer) == false)
                 throw new Exception($"Failed to get serializer for {typeof(T)}, returning default!");
 
-            dataSerializer.Deserialize(ref output, ref input, context);
+            dataSerializer.Deserialize(ref output, ref input);
         }
     }
 }
