@@ -6,6 +6,33 @@ namespace USerialization.Unity
 {
     public unsafe class UnityRuntimeUtils : IRuntimeUtils
     {
+#if UNITY_EDITOR || ENABLE_MONO
+        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_field_get_offset")]
+        private static extern int mono_field_get_offset(IntPtr classField);
+
+        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_class_instance_size")]
+        private static extern int mono_class_instance_size(IntPtr klass);
+
+        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_class_from_mono_type")]
+        private static extern IntPtr mono_class_from_mono_type(IntPtr monoType);
+
+        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_class_value_size")]
+        private static extern int mono_class_value_size(IntPtr monoType, uint* align);
+#else
+        [DllImport("__Internal", EntryPoint = "mono_field_get_offset")]
+        private static extern int mono_field_get_offset(IntPtr classField);
+
+        [DllImport("__Internal", EntryPoint = "mono_class_instance_size")]
+        private static extern int mono_class_instance_size(IntPtr klass);
+
+        [DllImport("__Internal", EntryPoint = "mono_class_from_mono_type")]
+        private static extern IntPtr mono_class_from_mono_type(IntPtr monoType);
+
+        [DllImport("__Internal", EntryPoint = "mono_class_value_size")]
+        private static extern int mono_class_value_size(IntPtr monoType, uint* align);
+#endif
+
+
         public int GetFieldOffset(FieldInfo fi)
         {
             if (fi == null)
@@ -29,18 +56,6 @@ namespace USerialization.Unity
 
             return sizeof(void*);
         }
-
-        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_field_get_offset")]
-        public static extern int mono_field_get_offset(IntPtr classField);
-
-        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_class_instance_size")]
-        public static extern int mono_class_instance_size(IntPtr klass);
-
-        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_class_from_mono_type")]
-        public static extern IntPtr mono_class_from_mono_type(IntPtr monoType);
-
-        [DllImport("mono-2.0-bdwgc", EntryPoint = "mono_class_value_size")]
-        public static extern int mono_class_value_size(IntPtr monoType, uint* align);
 
         private static int HeaderSize => sizeof(void*) * 2;
 

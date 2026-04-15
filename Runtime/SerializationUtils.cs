@@ -21,15 +21,18 @@ namespace USerialization.Unity
                     ISerializationProvider[] providers =
                     {
                         new PrimitivesSerializerProvider(),
+                        new CustomSerializerProvider(logger),
                         new EnumSerializer(),
                         new ArraySerializer(),
                         new ListSerializer(),
+                        
                         new TupleSerializationProvider(),
-                        new CallbackClassSerializationProvider(),
-                        new ClassSerializationProvider(),
-                        new StructSerializationProvider(),
                         new KeyValuePairSerializationProvider(),
                         new DictionarySerializerProvider(),
+                        
+                        new CallbackClassSerializationProvider(),
+                        new ClassSerializationProvider(),
+                        new StructSerializationProvider()
                     };
 
                     _serializer = new USerializer(new UnitySerializationPolicy(), providers,
