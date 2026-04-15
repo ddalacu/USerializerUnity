@@ -1,38 +1,26 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Unity.IL2CPP.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace USerialization
 {
-
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     public abstract class CustomClassSerializer<T> : CustomDataSerializer where T : class
     {
-        private TypeInstantiator _instantiator;
+        private readonly Type _type;
+        private readonly Func<object> _activator;
 
         private MemberSerializer _memberSerializer;
 
         private DataType _dataType;
 
-        public override DataType GetDataType() => _dataType;
+        public override DataType DataType => DataType.Object;
 
         protected CustomClassSerializer()
         {
-            _instantiator = new TypeInstantiator(typeof(T));//cache typeof to improve il2cpp perf
+            _type = typeof(T);
+            _activator = ObjectActivator.GetActivator(typeof(T));
         }
-
-        public override bool TryInitialize(USerializer serializer)
-        {
-            if (serializer.DataTypesDatabase.TryGet(out ObjectDataTypeLogic objectDataTypeLogic))
-            {
-                _dataType = objectDataTypeLogic.Value;
-                return true;
-            }
-
-            return false;
-        }
-
 
         public abstract void LocalInit(ClassMemberAdder<T> adder);
 
@@ -45,12 +33,15 @@ namespace USerialization
             foreach (var member in members)
                 member.DataSerializer.RootInitialize(serializer);
 
-            _memberSerializer = new MemberSerializer(members, serializer.DataTypesDatabase);
+            _memberSerializer = new MemberSerializer(IntPtr.Size, members, serializer.DataTypesDatabase);
         }
 
-        public override unsafe void Write(void* fieldAddress, SerializerOutput output, object context)
+        public override void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
-            if (Unsafe.Read<object>(fieldAddress) == null)
+            Debug.Assert(span.Length == IntPtr.Size);
+            ref var obj = ref Unsafe.As<byte, T>(ref MemoryMarshal.GetReference(span));
+
+            if (obj == null)
             {
                 output.WriteNull();
                 return;
@@ -58,30 +49,28 @@ namespace USerialization
 
             var track = output.BeginSizeTrack();
 
-            _memberSerializer.Write((byte*)fieldAddress, output, context);
+            _memberSerializer.Write(span, output, context);
 
             output.WriteSizeTrack(track);
         }
 
-        public override unsafe void Read(void* fieldAddress, SerializerInput input, object context)
+        public override void Read(Span<byte> span, ref SerializerInput input, object context)
         {
-            if (input.BeginReadSize(out var end))
+            Debug.Assert(span.Length == IntPtr.Size);
+
+            ref var objectInstance = ref Unsafe.As<byte, Object>(ref MemoryMarshal.GetReference(span));
+
+            if (input.NotNull())
             {
-                ref var objectInstance = ref Unsafe.AsRef<object>(fieldAddress);
                 if (objectInstance == null)
-                    objectInstance = _instantiator.CreateInstance();
+                    objectInstance = _activator();
 
-                _memberSerializer.Read((byte*)fieldAddress, input, context);
-
-                input.EndObject(end);
+                _memberSerializer.Read(span, ref input, context);
             }
             else
             {
-                ref var objectInstance = ref Unsafe.AsRef<object>(fieldAddress);
                 objectInstance = null;
             }
-
         }
     }
 }
-

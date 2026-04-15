@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Threading;
-
 
 namespace USerialization
 {
@@ -15,8 +13,6 @@ namespace USerialization
 
         private readonly TypeDictionary<DataSerializer> _methods =
             new TypeDictionary<DataSerializer>(512);
-
-        private readonly object _lock = new object();
 
         public ISerializationProvider[] Providers => _providers;
 
@@ -38,10 +34,7 @@ namespace USerialization
 
         public void Clear()
         {
-            lock (_lock)
-            {
-                _methods.Clear();
-            }
+            _methods.Clear();
         }
 
         public bool TryGetDataSerializer(Type type, out DataSerializer dataSerializer,
@@ -50,50 +43,30 @@ namespace USerialization
             if (type == null)
                 throw new ArgumentNullException(nameof(type));
 
-            var unlock = false;
-
-            //todo remove multiple threads support
-            
-            if (Monitor.IsEntered(_lock) == false) //allow only one thread at a time to get data serializer
+            if (_methods.TryGetValue(type, out dataSerializer))
             {
-                Monitor.Enter(_lock);
-                unlock = true;
+                if (initializeDataSerializer && dataSerializer != null)
+                    dataSerializer.RootInitialize(this);
+
+                return dataSerializer != null;
             }
 
-            try
+            foreach (var provider in _providers)
             {
-                if (_methods.TryGetValue(type, out dataSerializer))
-                {
-                    if (initializeDataSerializer && dataSerializer != null)
-                        dataSerializer.RootInitialize(this);
+                if (provider.TryGet(this, type, out dataSerializer) == false)
+                    continue;
 
-                    return dataSerializer != null;
-                }
-
-                foreach (var provider in _providers)
-                {
-                    if (provider.TryGet(this, type, out dataSerializer) == false)
-                        continue;
-
-                    _methods.Add(type, dataSerializer);
-
-                    if (initializeDataSerializer)
-                        dataSerializer.RootInitialize(this);
-
-                    return true;
-                }
-
-                dataSerializer = default;
                 _methods.Add(type, dataSerializer);
-                return false;
+
+                if (initializeDataSerializer)
+                    dataSerializer.RootInitialize(this);
+
+                return true;
             }
-            finally
-            {
-                if (unlock)
-                {
-                    Monitor.Exit(_lock);
-                }
-            }
+
+            dataSerializer = default;
+            _methods.Add(type, dataSerializer);
+            return false;
         }
 
         public bool TryGetNonCachedSerializationMethods(Type type, out DataSerializer dataSerializer,

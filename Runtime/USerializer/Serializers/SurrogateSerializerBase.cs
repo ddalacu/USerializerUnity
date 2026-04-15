@@ -1,10 +1,10 @@
-﻿using System.Runtime.CompilerServices;
-using Unity.IL2CPP.CompilerServices;
+﻿using System;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace USerialization
 {
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     public abstract class SurrogateSerializerBase<T, TSurrogate> : CustomDataSerializer
     {
         private USerializer _serializer;
@@ -13,7 +13,7 @@ namespace USerialization
 
         private DataSerializer _dataSerializer;
 
-        public override DataType GetDataType() => _dataSerializer.GetDataType();
+        public override DataType DataType => _dataSerializer.DataType;
 
         protected override void Initialize(USerializer serializer)
         {
@@ -34,23 +34,29 @@ namespace USerialization
         public abstract void CopyToSurrogate(ref T from, ref TSurrogate to);
 
         public abstract void CopyFromSurrogate(ref TSurrogate from, ref T to);
+        
 
-
-        public override unsafe void Write(void* fieldAddress, SerializerOutput output, object context)
+        public override void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
-            ref var instance = ref Unsafe.AsRef<T>(fieldAddress);
+            Debug.Assert(span.Length == Unsafe.SizeOf<T>());
+
+            ref var instance = ref Unsafe.As<byte, T>(ref MemoryMarshal.GetReference(span));
+
             var to = default(TSurrogate);
             CopyToSurrogate(ref instance, ref to);
-
-            _dataSerializer.Write(Unsafe.AsPointer(ref to), output, context);
+            ref var data = ref Unsafe.As<TSurrogate, byte>(ref to);
+            _dataSerializer.Write(MemoryMarshal.CreateSpan(ref data, Unsafe.SizeOf<TSurrogate>()), output, context);
         }
 
-        public override unsafe void Read(void* fieldAddress, SerializerInput input, object context)
+        public override void Read(Span<byte> span, ref SerializerInput input, object context)
         {
-            ref var instance = ref Unsafe.AsRef<T>(fieldAddress);
+            Debug.Assert(span.Length == Unsafe.SizeOf<T>());
+
+            ref var instance = ref Unsafe.As<byte, T>(ref MemoryMarshal.GetReference(span));
             var from = default(TSurrogate);
 
-            _dataSerializer.Read(Unsafe.AsPointer(ref from), input, context);
+            ref var data = ref Unsafe.As<TSurrogate, byte>(ref from);
+            _dataSerializer.Read(MemoryMarshal.CreateSpan(ref data, Unsafe.SizeOf<TSurrogate>()), ref input, context);
             CopyFromSurrogate(ref from, ref instance);
         }
     }

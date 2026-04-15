@@ -1,5 +1,6 @@
 ﻿using System;
-using Unity.IL2CPP.CompilerServices;
+using System.Diagnostics;
+using System.Reflection;
 
 namespace USerialization
 {
@@ -8,9 +9,6 @@ namespace USerialization
         public bool TryGet(USerializer serializer, Type type, out DataSerializer serializationMethods)
         {
             serializationMethods = default;
-
-            if (serializer.DataTypesDatabase.TryGet(out ObjectDataTypeLogic dataTypeLogic) == false)
-                return false;
 
             if (type.IsArray)
                 return false;
@@ -24,50 +22,55 @@ namespace USerialization
             if (serializer.SerializationPolicy.ShouldSerialize(type) == false)
                 return false;
 
-            serializationMethods = new StructDataSerializer(type, dataTypeLogic.Value);
+            serializationMethods = new StructDataSerializer(type,
+                (fieldInfo) => serializer.SerializationPolicy.ShouldSerialize(fieldInfo));
             return true;
         }
     }
 
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
-    public sealed unsafe class StructDataSerializer : DataSerializer
+    public sealed class StructDataSerializer : DataSerializer
     {
         private readonly Type _type;
 
-        private readonly DataType _dataType;
-
         private FieldsSerializer _fieldsSerializer;
 
-        public override DataType GetDataType() => _dataType;
+        private Func<FieldInfo, bool> _shouldSerialize;
+
+        public override DataType DataType => DataType.Object;
 
         protected override void Initialize(USerializer serializer)
         {
-            var (metas, serializationDatas) = FieldSerializationData.GetFields(_type, serializer);
+            var (metas, serializationDatas) = FieldSerializationData.GetFields(_type, serializer,
+                _shouldSerialize);
+
             _fieldsSerializer = new FieldsSerializer(metas, serializationDatas, serializer.DataTypesDatabase);
         }
 
-        public StructDataSerializer(Type type, DataType objectDataType)
+        private int _stackSize;
+
+        public StructDataSerializer(Type type, Func<FieldInfo, bool> shouldSerialize)
         {
             _type = type;
-            _dataType = objectDataType;
+            _stackSize = UnsafeUtils.GetStackSize(type);
+            _shouldSerialize = shouldSerialize;
         }
 
-        public override void Write(void* fieldAddress, SerializerOutput output, object context)
+        public override void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
+            Debug.Assert(span.Length == _stackSize);
+
             var track = output.BeginSizeTrack();
-
-            _fieldsSerializer.Write((byte*)fieldAddress, output, context);
-
+            _fieldsSerializer.Write(span, output, context);
             output.WriteSizeTrack(track);
         }
 
-        public override void Read(void* fieldAddress, SerializerInput input, object context)
+        public override void Read(Span<byte> span, ref SerializerInput input, object context)
         {
-            if (input.BeginReadSize(out var end))
+            Debug.Assert(span.Length == _stackSize);
+
+            if (input.NotNull())
             {
-                _fieldsSerializer.Read((byte*)fieldAddress, input, context);
-                input.EndObject(end);
+                _fieldsSerializer.Read(span, ref input, context);
             }
             else
             {

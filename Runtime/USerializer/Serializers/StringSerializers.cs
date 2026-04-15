@@ -1,33 +1,18 @@
-﻿using System.Runtime.CompilerServices;
-using Unity.IL2CPP.CompilerServices;
-using USerialization;
-
-[assembly: CustomSerializer(typeof(string), typeof(StringSerializer))]
+﻿using System;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace USerialization
 {
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     public sealed class StringSerializer : CustomDataSerializer
     {
-        private DataType _dataType;
+        public override DataType DataType => DataType.String;
 
-        public override DataType GetDataType() => _dataType;
-
-        public override bool TryInitialize(USerializer serializer)
+        public override void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
-            var typeLogic = serializer.DataTypesDatabase;
-
-            if (typeLogic.TryGet(out StringDataTypeLogic arrayDataTypeLogic) == false)
-                return false;
-
-            _dataType = arrayDataTypeLogic.Value;
-            return true;
-        }
-
-        public override unsafe void Write(void* fieldAddress, SerializerOutput output, object context)
-        {
-            var value = Unsafe.Read<string>(fieldAddress);
+            Debug.Assert(span.Length == IntPtr.Size);
+            ref var value = ref Unsafe.As<byte, string>(ref MemoryMarshal.GetReference(span));
 
             if (value == null)
             {
@@ -41,16 +26,13 @@ namespace USerialization
 
             output.EnsureNext(byteLength + 5); //5 if from the max size of Write7BitEncodedIntUnchecked
             output.Write7BitEncodedIntUnchecked(valueLength + 1);
-
-            fixed (void* textPtr = value)
-            {
-                output.WriteBytesUnchecked(textPtr, byteLength);
-            }
+            output.WriteSpan(value.AsSpan());
         }
 
-        public override unsafe void Read(void* fieldAddress, SerializerInput input, object context)
+        public override void Read(Span<byte> span, ref SerializerInput input, object context)
         {
-            ref var value = ref Unsafe.AsRef<string>(fieldAddress);
+            Debug.Assert(span.Length == IntPtr.Size);
+            ref var value = ref Unsafe.As<byte, string>(ref MemoryMarshal.GetReference(span));
 
             var length = input.Read7BitEncodedInt();
 
@@ -78,11 +60,9 @@ namespace USerialization
         }
     }
 
-    public sealed class StringDataTypeLogic : IDataTypeLogic
+    public sealed class StringDataSkipper : IDataSkipper
     {
-        public DataType Value { get; set; }
-
-        public void Skip(SerializerInput input)
+        public void Skip(ref SerializerInput input)
         {
             var chars = input.Read7BitEncodedInt();
 

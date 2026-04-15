@@ -1,9 +1,8 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.Serialization;
-using System.Threading;
-using Unity.IL2CPP.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace USerialization
 {
@@ -29,37 +28,37 @@ namespace USerialization
             if (type.IsPrimitive)
                 return false;
 
-            if (serializer.DataTypesDatabase.TryGet(out ObjectDataTypeLogic objectDataTypeLogic) == false)
-                return false;
-
             if (serializer.SerializationPolicy.ShouldSerialize(type) == false)
                 return false;
 
-            serializationMethods = new ClassDataSerializer(type, objectDataTypeLogic.Value);
+            var activator = ObjectActivator.GetActivator(type);
+
+            serializationMethods = new ClassDataSerializer(type,
+                activator,
+                (fieldInfo) => serializer.SerializationPolicy.ShouldSerialize(fieldInfo));
 
             return true;
         }
     }
 
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     public sealed unsafe class ClassDataSerializer : DataSerializer
     {
-        private TypeInstantiator _instantiator;
-
         private FieldsSerializer _fieldsSerializer;
-        
-        private readonly DataType _dataType;
 
-        public override DataType GetDataType() => _dataType;
+        private readonly int _heapSize;
+        private readonly Func<object> _activator;
+
+        public override DataType DataType => DataType.Object;
 
         protected override void Initialize(USerializer serializer)
         {
-            var (metas, serializationDatas) = FieldSerializationData.GetFields(_instantiator.Type, serializer);
+            var (metas, serializationDatas) = FieldSerializationData.GetFields(_type, serializer,
+                _shouldSerialize);
+
             _fieldsSerializer = new FieldsSerializer(metas, serializationDatas, serializer.DataTypesDatabase);
         }
-        
-        public ClassDataSerializer(Type type, DataType objectDataType)
+
+        public ClassDataSerializer(Type type, Func<object> activator, Func<FieldInfo, bool> shouldSerialize)
         {
             if (type == null)
                 throw new ArgumentNullException(nameof(type));
@@ -67,18 +66,26 @@ namespace USerialization
             if (type.IsValueType)
                 throw new ArgumentException(nameof(type));
 
-            _instantiator = new TypeInstantiator(type);
-            
-            _dataType = objectDataType;
+            _type = type;
+            _heapSize = UnsafeUtils.GetClassHeapSize(type);
+            _activator = activator;
+            _shouldSerialize = shouldSerialize;
         }
 
         private int _stack;
 
+        private readonly Type _type;
+
+        private readonly Func<FieldInfo, bool> _shouldSerialize;
+
         private const int MaxStack = 32;
 
-        public override void Write(void* fieldAddress, SerializerOutput output, object context)
+
+        public override void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
-            var obj = Unsafe.Read<object>(fieldAddress);
+            Debug.Assert(span.Length == IntPtr.Size);
+
+            ref var obj = ref Unsafe.As<byte, PinnableObject>(ref MemoryMarshal.GetReference(span));
 
             if (obj == null)
             {
@@ -93,11 +100,10 @@ namespace USerialization
 
             var track = output.BeginSizeTrack();
 
-            var pinnable = Unsafe.As<object, PinnableObject>(ref obj);
-
-            fixed (byte* objectAddress = &pinnable.Pinnable)
+            fixed (byte* objectAddress = &obj.Pinnable)
             {
-                _fieldsSerializer.Write(objectAddress, output, context);
+                var readOnlySpan = new Span<byte>(objectAddress, _heapSize);
+                _fieldsSerializer.Write(readOnlySpan, output, context);
             }
 
             output.WriteSizeTrack(track);
@@ -105,24 +111,23 @@ namespace USerialization
             _stack--;
         }
 
-        public override void Read(void* fieldAddress, SerializerInput input, object context)
+        public override void Read(Span<byte> span, ref SerializerInput input, object context)
         {
-            ref var instance = ref Unsafe.AsRef<object>(fieldAddress);
+            Debug.Assert(span.Length == IntPtr.Size);
+            ref var instance = ref Unsafe.As<byte, Object>(ref MemoryMarshal.GetReference(span));
 
-            if (input.BeginReadSize(out var end))
+            if (input.NotNull())
             {
                 if (instance == null)
                 {
-                    instance = _instantiator.CreateInstance();
+                    instance = _activator();
                 }
 
-                var pinnable = Unsafe.As<object, PinnableObject>(ref instance);
+                ref var pinnable = ref Unsafe.As<byte, PinnableObject>(ref MemoryMarshal.GetReference(span));
                 fixed (byte* objectAddress = &pinnable.Pinnable)
                 {
-                    _fieldsSerializer.Read(objectAddress, input, context);
+                    _fieldsSerializer.Read(new Span<byte>(objectAddress, _heapSize), ref input, context);
                 }
-
-                input.EndObject(end);
             }
             else
             {

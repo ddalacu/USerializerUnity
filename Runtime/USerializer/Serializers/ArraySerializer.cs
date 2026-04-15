@@ -1,8 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Threading;
-using Unity.IL2CPP.CompilerServices;
-
+using System.Runtime.InteropServices;
 namespace USerialization
 {
     public class ArraySerializer : ISerializationProvider
@@ -22,10 +21,7 @@ namespace USerialization
                 serializationMethods = default;
                 return false;
             }
-
-            if (serializer.DataTypesDatabase.TryGet(out ArrayDataTypeLogic arrayDataTypeLogic) == false)
-                return false;
-
+            
             var elementType = type.GetElementType();
 
             if (serializer.TryGetDataSerializer(elementType, out var elementSerializer, false) == false)
@@ -34,13 +30,11 @@ namespace USerialization
                 return false;
             }
 
-            serializationMethods = new ArrayDataSerializer(elementType, elementSerializer, arrayDataTypeLogic.Value);
+            serializationMethods = new ArrayDataSerializer(elementType, elementSerializer);
             return true;
         }
     }
-
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
+    
     public sealed unsafe class ArrayDataSerializer : DataSerializer
     {
         private readonly Type _elementType;
@@ -48,10 +42,8 @@ namespace USerialization
         private readonly DataSerializer _elementSerializer;
 
         private readonly int _size;
-
-        private readonly DataType _dataType;
-
-        public override DataType GetDataType() => _dataType;
+        
+        public override DataType DataType => DataType.Array;
 
         private DataType _elementDataType;
 
@@ -59,7 +51,7 @@ namespace USerialization
         {
             _elementSerializer.RootInitialize(serializer);
 
-            _elementDataType = _elementSerializer.GetDataType();
+            _elementDataType = _elementSerializer.DataType;
 
             if (_elementDataType == DataType.None)
             {
@@ -67,17 +59,18 @@ namespace USerialization
             }
         }
 
-        public ArrayDataSerializer(Type elementType, DataSerializer elementSerializer, DataType arrayDataType)
+        public ArrayDataSerializer(Type elementType, DataSerializer elementSerializer)
         {
-            _size = UnsafeUtils.GetArrayElementSize(elementType);
+            _size = UnsafeUtils.GetStackSize(elementType);
             _elementType = elementType;
             _elementSerializer = elementSerializer;
-            _dataType = arrayDataType;
         }
 
-        public override void Write(void* fieldAddress, SerializerOutput output, object context)
+        public override void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
-            var array = Unsafe.Read<Array>(fieldAddress);
+            Debug.Assert(span.Length == IntPtr.Size);
+            
+            ref var array = ref Unsafe.As<byte, Array>(ref MemoryMarshal.GetReference(span));
 
             if (array == null)
             {
@@ -87,14 +80,13 @@ namespace USerialization
 
             var count = array.Length;
 
-
             if (count > 0)
             {
                 var sizeTracker = output.BeginSizeTrack();
                 {
                     output.EnsureNext(6);
                     output.Write7BitEncodedIntUnchecked(count);
-                    output.WriteByteUnchecked((byte) _elementDataType);
+                    output.WriteByteUnchecked((byte)_elementDataType);
 
                     var pinnable = Unsafe.As<Array, byte[]>(ref array);
                     var serializer = _elementSerializer;
@@ -104,7 +96,7 @@ namespace USerialization
 
                         for (var index = 0; index < count; index++)
                         {
-                            serializer.Write(tempAddress, output, context);
+                            serializer.Write(new Span<byte>(tempAddress, _size), output, context);
                             tempAddress += _size;
                         }
                     }
@@ -120,9 +112,11 @@ namespace USerialization
         }
 
 
-        public override void Read(void* fieldAddress, SerializerInput input, object context)
+        public override void Read(Span<byte> span, ref SerializerInput input, object context)
         {
-            ref var array = ref Unsafe.AsRef<Array>(fieldAddress);
+            Debug.Assert(span.Length == IntPtr.Size);
+            
+            ref var array = ref Unsafe.As<byte, Array>(ref MemoryMarshal.GetReference(span));
 
             if (input.BeginReadSize(out var end))
             {
@@ -130,12 +124,12 @@ namespace USerialization
 
                 if (array == null || array.Length != count)
                 {
-                    array = ArrayHelpers.CreateArray(_elementType, count);
+                    array = Array.CreateInstance(_elementType, count);
                 }
 
                 if (count > 0)
                 {
-                    var type = (DataType) input.ReadByte();
+                    var type = (DataType)input.ReadByte();
 
                     if (type == _elementDataType)
                     {
@@ -147,14 +141,17 @@ namespace USerialization
 
                             for (var i = 0; i < count; i++)
                             {
-                                serializer.Read(tempAddress, input, context);
+                                serializer.Read(new Span<byte>(tempAddress, _size), ref input, context);
                                 tempAddress += _size;
                             }
                         }
                     }
+                    else
+                    {
+                        ArrayHelpers.CleanArray(array, 0, (uint)count, (uint)_size);
+                        input.EndObject(end);
+                    }
                 }
-
-                input.EndObject(end);
             }
             else
             {

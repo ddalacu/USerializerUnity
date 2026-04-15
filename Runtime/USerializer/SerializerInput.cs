@@ -1,8 +1,8 @@
 ﻿using System;
+using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Unity.IL2CPP.CompilerServices;
 
 namespace USerialization
 {
@@ -10,61 +10,53 @@ namespace USerialization
     {
     }
 
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
-    public sealed unsafe class SerializerInput : IDisposable
+    [StructLayout(LayoutKind.Auto)]
+    public ref struct SerializerInput // : IDisposable
     {
         private Stream _stream;
 
-        private byte* _buffer;
+        private byte[] _buffer;
 
-        private int _bufferSize;
+        private int _bufferPosition;
 
-        private int _position;
+        private int _bufferCount;
+
+        private readonly ArrayPool<byte> _pool;
+
         public Stream Stream => _stream;
-        
-        private int _availBytes;
+
+        private long _streamPosition;
 
         public long StreamPosition
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                var unusedBytes = _availBytes - _position;
-                var streamPos = _stream.Position - unusedBytes;
+                var unusedBytes = _bufferCount - _bufferPosition;
+                var streamPos = _streamPosition - unusedBytes;
                 return streamPos;
             }
         }
 
-        public SerializerInput(int capacity)
+        public SerializerInput(int capacity, Stream stream, ArrayPool<byte> pool)
         {
-            _buffer = (byte*) Marshal.AllocHGlobal(capacity).ToPointer();
-            _bufferSize = capacity;
-
-            _position = -1;
-            _availBytes = -1;
-        }
-
-        public SerializerInput(int capacity, Stream stream) : this(capacity)
-        {
+            _pool = pool;
+            _buffer = _pool.Rent(capacity);
+            _bufferPosition = -1;
+            _bufferCount = -1;
+            _stream = null;
             _stream = stream;
-        }
-
-        public void SetStream(Stream stream)
-        {
-            _stream = stream;
-            _position = -1;
-            _availBytes = -1;
+            _streamPosition = stream.Position;
         }
 
         public void FinishRead()
         {
-            var unusedBytes = _availBytes - _position;
+            if (_stream == null)
+                return;
 
-            _stream.Position = _stream.Position - unusedBytes;
-
-            _position = -1;
-            _availBytes = -1;
+            _stream.Position = StreamPosition;
+            _bufferPosition = 0;
+            _bufferCount = 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -83,69 +75,64 @@ namespace USerialization
                 return false;
             }
 
-            endObject = (EndObject) (StreamPosition + length);
+            endObject = (EndObject)(StreamPosition + length);
             return true;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool BeginReadSize(out EndObject endObject, out int length)
-        {
-            length = Read<int>();
-
-#if DEBUG
-            if (length < -1)
-                throw new Exception("Something went wrong!");
-#endif
-
-            if (length == -1)
-            {
-                endObject = default;
-                return false;
-            }
-
-            endObject = (EndObject) (StreamPosition + length);
-            return true;
-        }
-
+        public bool NotNull() => Read<int>() != -1;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void EndObject(EndObject endObject)
         {
-            SetPosition((long) endObject);
+            if (StreamPosition == (long)endObject)
+                return;
+
+            SetPosition((long)endObject);
         }
 
-        public void SetPosition(long initialPosition)
+        private void SetPosition(long initialPosition)
         {
-            if (_availBytes >= _position) //if these are equal then we might have no valid data
+            if (_bufferCount >= _bufferPosition) //if these are equal then we might have no valid data
             {
-                var positionInBuffer = initialPosition - (_stream.Position - _availBytes);
+                var positionInBuffer = initialPosition - (_streamPosition - _bufferCount);
 
                 if (positionInBuffer >= 0 &&
-                    positionInBuffer <= _availBytes)
+                    positionInBuffer <= _bufferCount)
                 {
-                    _position = (int) positionInBuffer;
+                    _bufferPosition = (int)positionInBuffer;
                     return;
                 }
             }
 
-            _stream.Position = initialPosition;
-            _position = -1;
-            _availBytes = -1;
+            _streamPosition = initialPosition;
+            _bufferPosition = 0;
+            _bufferCount = 0;
+
+            _stream.Position = _streamPosition;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public byte ReadByte()
         {
-            EnsureNext(1);
-            return _buffer[_position++];
+            if (_bufferPosition + 1 > _bufferCount)
+                ReadMore(1);
+
+            ref byte bufferRef = ref _buffer.AsSpan().GetPinnableReference();
+            var value = Unsafe.Add(ref bufferRef, _bufferPosition);
+            _bufferPosition++;
+            return value;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T Read<T>() where T : unmanaged
         {
-            EnsureNext(sizeof(T));
-            var value = Unsafe.ReadUnaligned<T>(_buffer + _position);
-            _position += sizeof(T);
+            var count = Unsafe.SizeOf<T>();
+            if (_bufferPosition + count > _bufferCount)
+                ReadMore(count);
+
+            ref byte bufferRef = ref _buffer.AsSpan().GetPinnableReference();
+            var value = Unsafe.ReadUnaligned<T>(ref Unsafe.Add(ref bufferRef, _bufferPosition));
+            _bufferPosition += count;
             return value;
         }
 
@@ -155,35 +142,14 @@ namespace USerialization
             int shift = 0;
             byte b;
 
-            var unusedBytes = _availBytes - _position;
-
-            if (unusedBytes >= 5)
-            {
-                do
-                {
-#if DEBUG
-                     if (shift == 5 * 7) // 5 bytes max
-                         throw new FormatException("WTF");
-#endif
-
-                    b = _buffer[_position++];
-
-                    count |= (b & 0x7F) << shift;
-                    shift += 7;
-                } while ((b & 0x80) != 0);
-
-                return count;
-            }
-
             do
             {
 #if DEBUG
-                if (shift == 5 * 7)  // 5 bytes max
+                if (shift == 5 * 7) // 5 bytes max
                     throw new FormatException("WTF");
 #endif
 
-                EnsureNext(1);
-                b = _buffer[_position++];
+                b = ReadByte();
 
                 count |= (b & 0x7F) << shift;
                 shift += 7;
@@ -191,119 +157,122 @@ namespace USerialization
 
             return count;
         }
-        
+
         public void Skip(int toSkip)
         {
             if (toSkip < 0)
                 throw new Exception("Skip needs to be positive!");
 
-            EnsureNext(toSkip);
-            _position += toSkip;
+            if (_bufferPosition + toSkip > _bufferCount)
+                ReadMore(toSkip);
+            _bufferPosition += toSkip;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ReadOnlySpan<T> GetNext<T>(int count) where T : unmanaged
         {
-            if (count < 0)
-                throw new Exception("Skip needs to be positive!");
-
-            var byteCount = count * sizeof(T);
-            EnsureNext(byteCount);
-            var span = new ReadOnlySpan<T>(_buffer + _position, count);
-            _position += byteCount;
+            var byteCount = count * Unsafe.SizeOf<T>();
+            if (_bufferPosition + byteCount > _bufferCount)
+                ReadMore(byteCount);
+            var span = MemoryMarshal.Cast<byte, T>(_buffer.AsSpan(_bufferPosition, byteCount));
+            _bufferPosition += byteCount;
             return span;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void ReadBytes(void* readPtr, int count)
+        public ReadOnlySpan<byte> GetNext(int count)
         {
-            EnsureNext(count);
-#if DEBUG
-                if (count < 0)
-                    throw new Exception("Count is negative!");
-#endif
+            if (_bufferPosition + count > _bufferCount)
+                ReadMore(count);
 
-            Unsafe.CopyBlockUnaligned(readPtr, _buffer + _position, (uint) count);
-
-            _position += count;
+            var span = _buffer.AsSpan(_bufferPosition, count);
+            _bufferPosition += count;
+            return span;
         }
 
-
-        public void EnsureNext(int count)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ReadSpan(Span<byte> readPtr)
         {
-            var end = _position + count;
+            var length = readPtr.Length;
 
-            if (end > _availBytes)
+            if (_bufferPosition + length > _bufferCount)
+                ReadMore(length);
+
+            ref byte bufferRef = ref _buffer.AsSpan().GetPinnableReference();
+            Unsafe.CopyBlockUnaligned(ref readPtr[0], ref Unsafe.Add(ref bufferRef, _bufferPosition),
+                (uint)length);
+            _bufferPosition += length;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ReadSpan<T>(Span<T> span) where T : unmanaged
+        {
+            ReadSpan(MemoryMarshal.AsBytes(span));
+        }
+
+        private void ReadMore(int count)
+        {
+            var unusedBytes = _bufferCount - _bufferPosition;
+
+#if DEBUG
+            if (unusedBytes < 0)
+                throw new Exception("Unused bytes is negative!");
+#endif
+
+            if (count > _buffer.Length)
             {
-                var bufferSize = _bufferSize;
+                var expanded = Math.Max(_buffer.Length * 2, count + unusedBytes);
 
-                if (_availBytes != -1)
-                {
-                    if (_availBytes < bufferSize)
-                    {
-                        //Debug.Assert(Stream.Position == Stream.Length);
-                        throw new Exception("Trying to read pass the stream!"); //read out of stream
-                    }
+                var newBuffer = _pool.Rent(expanded);
 
-                    var unusedBytes = _availBytes - _position;
+                if (unusedBytes > 0)
+                    _buffer.AsSpan(_bufferPosition, unusedBytes).CopyTo(newBuffer);
 
-#if DEBUG
-                    if (unusedBytes < 0)
-                        throw new Exception("Unused bytes is negative!");
-#endif
-
-                    if (count > bufferSize)
-                    {
-                        var expanded = count * 2;
-
-                        var newBuffer = (byte*) Marshal.AllocHGlobal(expanded).ToPointer();
-
-                        Unsafe.CopyBlockUnaligned(newBuffer, _buffer + _position, (uint) unusedBytes);
-
-                        Marshal.FreeHGlobal(new IntPtr(_buffer));
-
-                        _buffer = newBuffer;
-                        bufferSize = expanded;
-                    }
-                    else
-                    {
-                        Unsafe.CopyBlockUnaligned(_buffer, _buffer + _position, (uint) unusedBytes);
-                    }
-
-                    _position = 0;
-
-                    var toRead = new Span<byte>(_buffer + unusedBytes, bufferSize - unusedBytes);
-
-                    _availBytes = unusedBytes + _stream.Read(toRead);
-                }
-                else
-                {
-                    _position = 0;
-
-                    var toRead = new Span<byte>(_buffer, bufferSize);
-                    _availBytes = _stream.Read(toRead);
-                }
+                _pool.Return(_buffer);
+                _buffer = newBuffer;
             }
+            else
+            {
+                if (unusedBytes > 0)
+                    _buffer.AsSpan(_bufferPosition, unusedBytes).CopyTo(_buffer);
+            }
+
+            _bufferPosition = 0;
+
+            var toRead = _buffer.AsSpan(unusedBytes, _buffer.Length - unusedBytes);
+
+            var read = ReadInSpan(toRead);
+            _streamPosition += read;
+            _bufferCount = unusedBytes + read;
+
+            if (_bufferCount < count)
+                throw new Exception("Trying to read pass the stream!"); //read out of stream
         }
 
-        private void InternalDispose()
+        private int ReadInSpan(Span<byte> span)
         {
-            if (_buffer == null)
-                return;
+            var cRead = 0;
+            var length = span.Length;
 
-            Marshal.FreeHGlobal(new IntPtr(_buffer));
-            _buffer = null;
+            while (cRead < length)
+            {
+                var read = _stream.Read(span.Slice(cRead));
+                if (read == 0)
+                    break;
+
+                cRead += read;
+            }
+
+            return cRead;
         }
 
         public void Dispose()
         {
-            GC.SuppressFinalize(this);
-            InternalDispose();
-        }
-
-        ~SerializerInput()
-        {
-            InternalDispose();
+            if (_pool != null)
+            {
+                _pool.Return(_buffer);
+                _buffer = null;
+            }
         }
     }
 }

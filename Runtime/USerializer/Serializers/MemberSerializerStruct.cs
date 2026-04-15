@@ -1,6 +1,6 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Unity.IL2CPP.CompilerServices;
 
 namespace USerialization
 {
@@ -19,7 +19,7 @@ namespace USerialization
 
             Serializer = dataSerializer;
 
-            var data = dataSerializer.GetDataType();
+            var data = dataSerializer.DataType;
             if (data == DataType.None)
                 throw new Exception();
         }
@@ -37,15 +37,17 @@ namespace USerialization
         }
     }
 
-    public readonly unsafe struct MemberSerializer
+    public readonly struct MemberSerializer
     {
         public readonly FinalMemberSerializerStruct[] Members;
+
+        private readonly int _size;
 
         private readonly DataTypesDatabase _dataTypesDatabase;
 
         private readonly byte[] _headerData;
 
-        public MemberSerializer(MemberSerializerStruct[] members, DataTypesDatabase dataTypesDatabase)
+        public MemberSerializer(int size, MemberSerializerStruct[] members, DataTypesDatabase dataTypesDatabase)
         {
             var final = new FinalMemberSerializerStruct[members.Length];
             for (var i = 0; i < members.Length; i++)
@@ -53,6 +55,7 @@ namespace USerialization
 
             Members = final;
 
+            _size = size;
             _dataTypesDatabase = dataTypesDatabase;
             _headerData = CreateHeaderData(Members);
         }
@@ -65,20 +68,20 @@ namespace USerialization
             var headerData = new byte[size];
 
             int position = 0;
-            headerData[position++] = (byte) fieldsLength;
+            headerData[position++] = (byte)fieldsLength;
 
             for (var index = 0; index < fieldsLength; index++)
             {
                 var fieldData = datas[index];
                 var hash = fieldData.Hash;
-                headerData[position++] = (byte) hash;
-                headerData[position++] = (byte) (hash >> 8);
-                headerData[position++] = (byte) (hash >> 16);
-                headerData[position++] = (byte) (hash >> 24);
+                headerData[position++] = (byte)hash;
+                headerData[position++] = (byte)(hash >> 8);
+                headerData[position++] = (byte)(hash >> 16);
+                headerData[position++] = (byte)(hash >> 24);
 
-                var dataType = fieldData.Serializer.GetDataType();
+                var dataType = fieldData.Serializer.DataType;
 
-                headerData[position++] = (byte) dataType;
+                headerData[position++] = (byte)dataType;
 
                 if (dataType == DataType.None)
                     throw new Exception("Data type is none!");
@@ -87,35 +90,34 @@ namespace USerialization
             return headerData;
         }
 
-        [Il2CppSetOption(Option.NullChecks, false)]
-        [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Write(byte* objectAddress, SerializerOutput output, object context)
+        public void Write(ReadOnlySpan<byte> span, SerializerOutput output, object context)
         {
+            Debug.Assert(span.Length == _size);
+
             var typeDataFields = Members;
 
             var fieldsLength = typeDataFields.Length;
 
-            fixed (void* ptr = _headerData)
-                output.WriteBytes(ptr, _headerData.Length);
+            output.WriteSpan<byte>(_headerData.AsSpan());
 
             for (var index = 0; index < fieldsLength; index++)
             {
                 var fieldData = typeDataFields[index];
-                fieldData.Serializer.Write(objectAddress, output, context);
+                fieldData.Serializer.Write(span, output, context);
             }
         }
 
-        [Il2CppSetOption(Option.NullChecks, false)]
-        [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Read(byte* objectAddress, SerializerInput input, object context)
+        public void Read(Span<byte> span, ref SerializerInput input, object context)
         {
+            Debug.Assert(span.Length == _size);
+
             var fieldDatas = Members;
 
             var fieldCount = input.ReadByte();
 
-            var streamData = input.GetNext<byte>(fieldCount * 5);
+            var streamData = input.GetNext(fieldCount * 5);
 
             var localData = new ReadOnlySpan<byte>(_headerData, 1, _headerData.Length - 1);
 
@@ -124,15 +126,15 @@ namespace USerialization
                 for (var i = 0; i < fieldCount; i++)
                 {
                     var fieldData = fieldDatas[i];
-                    fieldData.Serializer.Read(objectAddress, input, context);
+                    fieldData.Serializer.Read(span, ref input, context);
                 }
             }
             else
             {
                 int position = 0;
 
-                var indexes = stackalloc byte[fieldCount];
-                var dataTypes = stackalloc DataType[fieldCount];
+                Span<byte> indexes = stackalloc byte[fieldCount];
+                Span<DataType> dataTypes = stackalloc DataType[fieldCount];
 
                 var fieldsLength = fieldDatas.Length;
 
@@ -141,7 +143,7 @@ namespace USerialization
                 {
                     var field = streamData[position++] | streamData[position++] << 8 | streamData[position++] << 16 |
                                 streamData[position++] << 24;
-                    var type = (DataType) streamData[position++];
+                    var type = (DataType)streamData[position++];
 
                     var deserialized = false;
 
@@ -151,9 +153,9 @@ namespace USerialization
 
                         if (field == fieldData.Hash)
                         {
-                            if (type == fieldData.Serializer.GetDataType())
+                            if (type == fieldData.Serializer.DataType)
                             {
-                                indexes[i] = (byte) searchIndex;
+                                indexes[i] = (byte)searchIndex;
                                 deserialized = true;
                             }
 
@@ -182,12 +184,12 @@ namespace USerialization
 
                     if (index == 255)
                     {
-                        _dataTypesDatabase.SkipData(dataTypes[i], input);
+                        _dataTypesDatabase.SkipData(dataTypes[i], ref input);
                         continue;
                     }
 
                     var fieldData = fieldDatas[index];
-                    fieldData.Serializer.Read(objectAddress, input, context);
+                    fieldData.Serializer.Read(span, ref input, context);
                 }
             }
         }
